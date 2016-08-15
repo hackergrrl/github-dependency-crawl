@@ -6,77 +6,94 @@ var asyncReduce = require('async').reduce
 // TODO: use a github api module instead of http api directly
 
 
-module.exports = function (repo, cb) {
-  recursiveRepoNameToDependencyGraph(repo, {}, cb)
-}
+module.exports = function (opts, cb) {
 
-
-function recursiveRepoNameToDependencyGraph (repo, graph, cb) {
-  "Asynchronously gets all issues from a GitHub repo and follows all out-of-repo links recursively, returning a full dependency graph for that repo."
-
-  ownerRepoToDependencyGraph(repo, function (err, graph2) {
-    if (err) return cb(err)
-
-    // console.log('repo ->', graph2)
-
-    graph = flatMerge(graph, graph2)
-
-    recursiveResolveGraph(graph, cb)
-  })
-}
-
-function recursiveResolveGraph (graph, cb) {
-  "Asynchronously takes a partially resolved graph and looks up unresolved dependencies against GitHub until all are satisfied."
-
-  var unresolved = getUnresolvedDependencies(graph)
-  // console.log('unres', unresolved)
-
-  // Base case; all is resolved already
-  if (!unresolved.length) {
-    return cb(null, graph)
+  if (typeof opts === 'string') {
+    opts = { repo: opts }
   }
 
-  // TODO: a possible optimization might be to check if there are e.g. > N
-  // unresolved dependencies for a single :owner/:repo tuple, and just do a
-  // fetch of that repo's full issue set, filtering out what's not needed.
-  asyncReduce(unresolved, graph,
-    function reduce (graph, issue, callback) {
-      // console.log('issue ->', issue)
-      issueToDependencyGraph(issue, function (err, innerGraph) {
-        // console.log('flatMerge', graph, innerGraph)
-        callback(null, flatMerge(graph, innerGraph))
-      })
-    },
-    function done (err, res) {
+  if (!opts.repo) {
+    throw new Error('missing first param "repo"')
+  }
+
+  opts.repoToGitHubIssues = opts.repoToGitHubIssues || ownerRepoToGitHubIssues
+  opts.issueToGitHubIssue = opts.issueToGitHubIssue || issueToGitHubIssue
+
+  recursiveRepoNameToDependencyGraph(opts.repo, {}, cb)
+
+
+  function recursiveRepoNameToDependencyGraph (repo, graph, cb) {
+    "Asynchronously gets all issues from a GitHub repo and follows all out-of-repo links recursively, returning a full dependency graph for that repo."
+
+    ownerRepoToDependencyGraph(repo, function (err, graph2) {
       if (err) return cb(err)
-      recursiveResolveGraph(res, cb)
+
+      // console.log('repo ->', graph2)
+
+      graph = flatMerge(graph, graph2)
+
+      recursiveResolveGraph(graph, cb)
     })
-}
+  }
 
-function getUnresolvedDependencies (graph) {
-  "Finds all issues that are referenced by the graph but not contained in it."
+  function recursiveResolveGraph (graph, cb) {
+    "Asynchronously takes a partially resolved graph and looks up unresolved dependencies against GitHub until all are satisfied."
 
-  return Object.keys(graph)
-    .reduce(function (issues, key) {
-      // all referenced deps that don't exist in the graph
-      var unresolved = graph[key].filter(function (d) {
-        return graph[d] === undefined
+    var unresolved = getUnresolvedDependencies(graph)
+    // console.log('unres', unresolved)
+
+    // Base case; all is resolved already
+    if (!unresolved.length) {
+      return cb(null, graph)
+    }
+
+    // TODO: a possible optimization might be to check if there are e.g. > N
+    // unresolved dependencies for a single :owner/:repo tuple, and just do a
+    // fetch of that repo's full issue set, filtering out what's not needed.
+    asyncReduce(unresolved, graph,
+      function reduce (graph, issue, callback) {
+        // console.log('issue ->', issue)
+        issueToDependencyGraph(issue, function (err, innerGraph) {
+          // console.log('flatMerge', graph, innerGraph)
+          callback(null, flatMerge(graph, innerGraph))
+        })
+      },
+      function done (err, res) {
+        if (err) return cb(err)
+        recursiveResolveGraph(res, cb)
       })
+  }
 
-      return issues.concat(unresolved)
-    }, [])
+  function ownerRepoToDependencyGraph (ownerRepo, cb) {
+    "Given a GitHub repo of the form ':owner/:repo', returns a dependency graph."
+
+    opts.repoToGitHubIssues(ownerRepo, function (err, issues) {
+      if (err) return cb(err)
+      cb(null, githubIssuesToDependencyGraph(issues))
+    })
+  }
+
+
+  function issueToDependencyGraph (issue, cb) {
+    "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
+
+    opts.issueToGitHubIssue(issue, function (err, res) {
+      if (err) return cb(err)
+
+      var graph = githubIssuesToDependencyGraph([res])
+
+      // Deal with the case that we were redirected, lest infinite loops occur.
+      // e.g. We ask for ipfs/ipget/1 but results refer to noffle/ipget/1
+      var name = dependencyUrlToCanonicalName(res.url)
+      if (name !== issue) {
+        replaceInGraph(graph, name, issue)
+      }
+
+      cb(null, graph)
+    })
+  }
 }
 
-function ownerRepoToDependencyGraph (ownerRepo, cb) {
-  "Given a GitHub repo of the form ':owner/:repo', returns a dependency graph."
-
-  ownerRepoToGitHubIssues(ownerRepo, function (err, issues) {
-    if (err) return cb(err)
-    cb(null, githubIssuesToDependencyGraph(issues))
-  })
-}
-
-// TODO: let api users plug+play this function
 function ownerRepoToGitHubIssues (ownerRepo, cb) {
   "Given a string of the form :owner/:repo, asynchronously retrives a list of GitHub API issues."
 
@@ -111,25 +128,6 @@ function ownerRepoToGitHubIssues (ownerRepo, cb) {
     }
 
     cb(null, body)
-  })
-}
-
-function issueToDependencyGraph (issue, cb) {
-  "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
-
-  issueToGitHubIssue(issue, function (err, res) {
-    if (err) return cb(err)
-
-    var graph = githubIssuesToDependencyGraph([res])
-
-    // Deal with the case that we were redirected, lest infinite loops occur.
-    // e.g. We ask for ipfs/ipget/1 but results refer to noffle/ipget/1
-    var name = dependencyUrlToCanonicalName(res.url)
-    if (name !== issue) {
-      replaceInGraph(graph, name, issue)
-    }
-
-    cb(null, graph)
   })
 }
 
@@ -199,6 +197,20 @@ function githubIssuesToDependencyGraph (issues) {
       graph[name] = issue[name]
       return graph
     }, {})
+}
+
+function getUnresolvedDependencies (graph) {
+  "Finds all issues that are referenced by the graph but not contained in it."
+
+  return Object.keys(graph)
+    .reduce(function (issues, key) {
+      // all referenced deps that don't exist in the graph
+      var unresolved = graph[key].filter(function (d) {
+        return graph[d] === undefined
+      })
+
+      return issues.concat(unresolved)
+    }, [])
 }
 
 function extractDependencyUrls (string, ownerRepo) {
