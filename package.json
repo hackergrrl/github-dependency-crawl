@@ -1,5 +1,5 @@
 {
-  "name": "gh-issue-dep-crawl",
+  "name": "github-dependency-crawl",
   "version": "1.0.0",
   "description": "crawl github issues to build a dependency graph",
   "main": "index.js",
