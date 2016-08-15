@@ -17,28 +17,51 @@ function recursiveRepoNameToDependencyGraph (repo, graph, cb) {
   repoNameToDependencyGraph(repo, function (err, graph2) {
     if (err) return cb(err)
 
-    console.log('repo ->', graph2)
+    // console.log('repo ->', graph2)
 
     graph = flatMerge(graph, graph2)
 
-    var unresolved = getUnresolvedDependencies(graph)
-
-    asyncReduce(unresolved, graph,
-      function reduce (graph, issues, callback) {
-        console.log('issue ->', issues)
-        callback(null, flatMerge(graph, issues))
-      },
-      /*done*/ cb)
+    recursiveResolveGraph(graph, cb)
   })
+}
+
+function recursiveResolveGraph (graph, cb) {
+  "Asynchronously takes a partially resolved graph and looks up unresolved dependencies against GitHub until all are satisfied."
+
+  var unresolved = getUnresolvedDependencies(graph)
+  // console.log('unres', unresolved)
+
+  // Base case; all is resolved already
+  if (!unresolved.length) {
+    return cb(null, graph)
+  }
+
+  // TODO: a possible optimization might be to check if there are e.g. > N
+  // unresolved dependencies for a single :owner/:repo tuple, and just do a
+  // fetch of that repo's full issue set, filtering out what's not needed.
+  asyncReduce(unresolved, graph,
+    function reduce (graph, issue, callback) {
+      // console.log('issue ->', issue)
+      issueToDependencyGraph(issue, function (err, innerGraph) {
+        // console.log('flatMerge', graph, innerGraph)
+        callback(null, flatMerge(graph, innerGraph))
+      })
+    },
+    function done (err, res) {
+      if (err) return cb(err)
+      recursiveResolveGraph(res, cb)
+    })
 }
 
 function getUnresolvedDependencies (graph) {
   "Finds all issues that are referenced by the graph but not contained in it."
 
-  Object.keys(graph)
+  return Object.keys(graph)
     .reduce(function (issues, key) {
       // all referenced deps that don't exist in the graph
-      var unresolved = graph[key].filter(function (d) { return graph[d] })
+      var unresolved = graph[key].filter(function (d) {
+        return graph[d] === undefined
+      })
 
       return issues.concat(unresolved)
     }, [])
@@ -64,11 +87,11 @@ function repoNameToDependencyGraph (repo, cb) {
       'User-Agent': userAgent()
     }
   }
-  console.error('request:', opts.url)
+  // console.error('request:', opts.url)
   request(opts, function (err, res, body) {
     // Bogus response
     if (err || res.statusCode !== 200) {
-      console.log(res)
+      // console.log(res)
       return cb(err || new Error('status code ' + res.statusCode))
     }
 
@@ -88,7 +111,7 @@ function repoNameToDependencyGraph (repo, cb) {
   // cb(null, graph)
 }
 
-function issueToDependencyGraph (issue) {
+function issueToDependencyGraph (issue, cb) {
   "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
 
   // Validate the input
@@ -108,11 +131,11 @@ function issueToDependencyGraph (issue) {
       'User-Agent': userAgent()
     }
   }
-  console.error('request:', opts.url)
+  // console.error('request:', opts.url)
   request(opts, function (err, res, body) {
     // Bogus response
     if (err || res.statusCode !== 200) {
-      console.log(res)
+      // console.log(res)
       return cb(err || new Error('status code ' + res.statusCode))
     }
 
@@ -123,7 +146,16 @@ function issueToDependencyGraph (issue) {
       return cb(err)
     }
 
-    cb(null, githubIssuesToDependencyGraph([body]))
+    var graph = githubIssuesToDependencyGraph([body])
+
+    // Deal with the case that we were redirected, lest infinite loops occur.
+    // e.g. We ask for ipfs/ipget/1 but results refer to noffle/ipget/1
+    var name = dependencyUrlToCanonicalName(body.url)
+    if (name !== issue) {
+      replaceInGraph(graph, name, issue)
+    }
+
+    cb(null, graph)
   })
 }
 
@@ -137,12 +169,13 @@ function githubIssuesToDependencyGraph (issues) {
   //   ...
   // }
   issues = filterMap(issues, function (issue) {
-    var deps = extractDependencyUrls(issue.body).map(dependencyUrlToCanonicalName)
     var name = dependencyUrlToCanonicalName(issue.url)
-    // console.log(name, deps)
+    var ownerRepo = name.split('/').slice(0, 2).join('/')
+    var deps = extractDependencyUrls(issue.body, ownerRepo)
+      .map(dependencyUrlToCanonicalName)
     var res = {}
     res[name] = deps
-    return deps.length > 0 ? res : null
+    return res
   })
 
   // Merge the individual issues together into a single object
@@ -154,9 +187,8 @@ function githubIssuesToDependencyGraph (issues) {
     }, {})
 }
 
-// TODO: match against #123 instead of just a URL, which implies a same-repo issue dep
-function extractDependencyUrls (string) {
-  "Given a freeform multi-line string, extract all dependencies as URLs."
+function extractDependencyUrls (string, ownerRepo) {
+  "Given a freeform multi-line string, extract all dependencies as URLs. If an optional 'ownerRepo' string is given (e.g. noffle/latest-tweets), dependency strings of the form 'Depends on #24' can be resolved to the current repo."
 
   // TODO: assumes \r\n newlines, which is correct *today*, but in THE FUTURE?
   // iterate over lines in the body
@@ -168,6 +200,10 @@ function extractDependencyUrls (string) {
       if (urls.length === 1) {
         return urls[0]
       }
+    } else if (ownerRepo && line.match(/^Depends on #(\d+)/)) {
+      // extract issue-num
+      var issueNum = line.match(/^Depends on #(\d+)/)[1]
+      return 'https://github.com/' + ownerRepo + '/issues/' + issueNum
     }
     return false
   })
@@ -199,6 +235,25 @@ function userAgent () {
 
   var package = require(require('path').join(__dirname, 'package.json'))
   return package.name + '/' + package.version
+}
+
+function replaceInGraph (graph, from, to) {
+  "In-place graph mutation, where all instances of 'from' are replaced with 'to'."
+
+  Object.keys(graph)
+    .forEach(function (key) {
+      // replace top-level key
+      if (key === from) {
+        graph[to] = graph[from]
+        delete graph[from]
+        key = to
+      }
+
+      // replace occurrences in dependencies
+      graph[key] = graph[key].map(function (dep) {
+        return (dep === from) ? to : dep
+      })
+    })
 }
 
 function filterMap (list, func) {
