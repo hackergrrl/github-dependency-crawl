@@ -14,7 +14,7 @@ module.exports = function (repo, cb) {
 function recursiveRepoNameToDependencyGraph (repo, graph, cb) {
   "Asynchronously gets all issues from a GitHub repo and follows all out-of-repo links recursively, returning a full dependency graph for that repo."
 
-  repoNameToDependencyGraph(repo, function (err, graph2) {
+  ownerRepoToDependencyGraph(repo, function (err, graph2) {
     if (err) return cb(err)
 
     // console.log('repo ->', graph2)
@@ -67,19 +67,27 @@ function getUnresolvedDependencies (graph) {
     }, [])
 }
 
-function repoNameToDependencyGraph (repo, cb) {
+function ownerRepoToDependencyGraph (ownerRepo, cb) {
   "Given a GitHub repo of the form ':owner/:repo', returns a dependency graph."
+
+  ownerRepoToGitHubIssues(ownerRepo, function (err, issues) {
+    if (err) return cb(err)
+    cb(null, githubIssuesToDependencyGraph(issues))
+  })
+}
+
+// TODO: let api users plug+play this function
+function ownerRepoToGitHubIssues (ownerRepo, cb) {
+  "Given a string of the form :owner/:repo, asynchronously retrives a list of GitHub API issues."
 
   var url = 'https://api.github.com/repos/'
 
   // Match freeform repo string to a GH url
-  if (repo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
-    url += repo + '/issues'
+  if (ownerRepo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
+    url += ownerRepo + '/issues'
   } else {
     throw new Error('unrecognized repo format. expected: owner/repo')
   }
-
-  var graph = {}
 
   var opts = {
     url: url,
@@ -102,17 +110,32 @@ function repoNameToDependencyGraph (repo, cb) {
       return cb(err)
     }
 
-    cb(null, flatMerge(graph, githubIssuesToDependencyGraph(body)))
+    cb(null, body)
   })
-
-  // var body = JSON.parse(require('fs').readFileSync('random-ideas'))
-  // graph = flatMerge(graph, issuesToDependencyGraph(body))
-  // // console.log('graph', graph)
-  // cb(null, graph)
 }
 
 function issueToDependencyGraph (issue, cb) {
   "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
+
+  issueToGitHubIssue(issue, function (err, res) {
+    if (err) return cb(err)
+
+    var graph = githubIssuesToDependencyGraph([res])
+
+    // Deal with the case that we were redirected, lest infinite loops occur.
+    // e.g. We ask for ipfs/ipget/1 but results refer to noffle/ipget/1
+    var name = dependencyUrlToCanonicalName(res.url)
+    if (name !== issue) {
+      replaceInGraph(graph, name, issue)
+    }
+
+    cb(null, graph)
+  })
+}
+
+// TODO: let api users plug+play this function
+function issueToGitHubIssue (issue, cb) {
+  "Given a string of the form :owner/:repo/:issue, asynchronously retrives the corresponding GitHub API issue."
 
   // Validate the input
   var components = issue.split('/')
@@ -146,16 +169,7 @@ function issueToDependencyGraph (issue, cb) {
       return cb(err)
     }
 
-    var graph = githubIssuesToDependencyGraph([body])
-
-    // Deal with the case that we were redirected, lest infinite loops occur.
-    // e.g. We ask for ipfs/ipget/1 but results refer to noffle/ipget/1
-    var name = dependencyUrlToCanonicalName(body.url)
-    if (name !== issue) {
-      replaceInGraph(graph, name, issue)
-    }
-
-    cb(null, graph)
+    cb(null, body)
   })
 }
 
