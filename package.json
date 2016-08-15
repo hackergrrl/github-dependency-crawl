@@ -19,6 +19,7 @@
   "author": "Stephen Whitmore <stephen.whitmore@gmail.com>",
   "license": "ISC",
   "dependencies": {
+    "async": "^2.0.1",
     "request": "^2.74.0",
     "url-regexp": "^1.0.2"
   }

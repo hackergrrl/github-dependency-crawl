@@ -1,52 +1,133 @@
 var request = require('request')
 var urlMatch = require('url-regexp').match
 var urlParse = require('url').parse
+var asyncReduce = require('async').reduce
 
-// TODO: separate GH requests from depgraph building
+// TODO: use a github api module instead of http api directly
+
+
 module.exports = function (repo, cb) {
+  recursiveRepoNameToDependencyGraph(repo, {}, cb)
+}
+
+
+function recursiveRepoNameToDependencyGraph (repo, graph, cb) {
+  "Asynchronously gets all issues from a GitHub repo and follows all out-of-repo links recursively, returning a full dependency graph for that repo."
+
+  repoNameToDependencyGraph(repo, function (err, graph2) {
+    if (err) return cb(err)
+
+    console.log('repo ->', graph2)
+
+    graph = flatMerge(graph, graph2)
+
+    var unresolved = getUnresolvedDependencies(graph)
+
+    asyncReduce(unresolved, graph,
+      function reduce (graph, issues, callback) {
+        console.log('issue ->', issues)
+        callback(null, flatMerge(graph, issues))
+      },
+      /*done*/ cb)
+  })
+}
+
+function getUnresolvedDependencies (graph) {
+  "Finds all issues that are referenced by the graph but not contained in it."
+
+  Object.keys(graph)
+    .reduce(function (issues, key) {
+      // all referenced deps that don't exist in the graph
+      var unresolved = graph[key].filter(function (d) { return graph[d] })
+
+      return issues.concat(unresolved)
+    }, [])
+}
+
+function repoNameToDependencyGraph (repo, cb) {
+  "Given a GitHub repo of the form ':owner/:repo', returns a dependency graph."
+
   var url = 'https://api.github.com/repos/'
 
   // Match freeform repo string to a GH url
-  // if (repo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
-  //   url += repo + '/issues'
-  // } else {
-  //   throw new Error('unrecognized repo format. expected: owner/repo')
-  // }
+  if (repo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
+    url += repo + '/issues'
+  } else {
+    throw new Error('unrecognized repo format. expected: owner/repo')
+  }
 
   var graph = {}
 
-  var body = JSON.parse(require('fs').readFileSync('random-ideas'))
+  var opts = {
+    url: url,
+    headers: {
+      'User-Agent': userAgent()
+    }
+  }
+  console.error('request:', opts.url)
+  request(opts, function (err, res, body) {
+    // Bogus response
+    if (err || res.statusCode !== 200) {
+      console.log(res)
+      return cb(err || new Error('status code ' + res.statusCode))
+    }
 
-  // var opts = {
-  //   url: url,
-  //   headers: {
-  //     'User-Agent': 'curl/7.47.1'
-  //   }
-  // }
-  // request(opts, function (err, res, body) {
-  //   // Bogus response
-  //   if (err || res.statusCode !== 200) {
-  //     console.log(res)
-  //     return cb(err || new Error('status code ' + res.statusCode))
-  //   }
+    // Parse JSON response
+    try {
+      body = JSON.parse(body)
+    } catch (err) {
+      return cb(err)
+    }
 
-  //   // Parse JSON response
-  //   try {
-  //     body = JSON.parse(body)
-  //   } catch (err) {
-  //     return cb(err)
-  //   }
+    cb(null, flatMerge(graph, githubIssuesToDependencyGraph(body)))
+  })
 
-  //   cb(null, addToGraph(graph, body))
-  // })
-
-  graph = flatMerge(graph, issuesToDependencyGraph(body))
-  // console.log('graph', graph)
-
-  cb(null, graph)
+  // var body = JSON.parse(require('fs').readFileSync('random-ideas'))
+  // graph = flatMerge(graph, issuesToDependencyGraph(body))
+  // // console.log('graph', graph)
+  // cb(null, graph)
 }
 
-function issuesToDependencyGraph (issues) {
+function issueToDependencyGraph (issue) {
+  "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
+
+  // Validate the input
+  var components = issue.split('/')
+  if (components.length !== 3) {
+    throw new Error('malformed input; expected :owner/:repo/:issue-num')
+  }
+
+  var owner = components[0]
+  var repo = components[1]
+  var issueNum = components[2]
+
+  // Retrieve the issue
+  var opts = {
+    url: 'https://api.github.com/repos/' + owner + '/' + repo + '/issues/' + issueNum,
+    headers: {
+      'User-Agent': userAgent()
+    }
+  }
+  console.error('request:', opts.url)
+  request(opts, function (err, res, body) {
+    // Bogus response
+    if (err || res.statusCode !== 200) {
+      console.log(res)
+      return cb(err || new Error('status code ' + res.statusCode))
+    }
+
+    // Parse JSON response
+    try {
+      body = JSON.parse(body)
+    } catch (err) {
+      return cb(err)
+    }
+
+    cb(null, githubIssuesToDependencyGraph([body]))
+  })
+}
+
+function githubIssuesToDependencyGraph (issues) {
   "Given a list of GitHub API issues and returns a dep-graph with all newly discovered dependencies from the issues given."
 
   // Iterate over each GH API issue, extract its declared dependencies, and
@@ -111,6 +192,13 @@ function dependencyUrlToCanonicalName (url) {
   }
 
   return null
+}
+
+function userAgent () {
+  "Produces a User-Agent string using the package's name and version, of the form NAME/VERSION."
+
+  var package = require(require('path').join(__dirname, 'package.json'))
+  return package.name + '/' + package.version
 }
 
 function filterMap (list, func) {
