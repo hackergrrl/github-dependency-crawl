@@ -39,10 +39,13 @@ dependencies.
 var crawl = require('github-dependency-crawl')
 ```
 
-### crawl(ownerRepo, cb)
+### crawl(opts, cb)
 
 Asynchronously makes many GitHub API requests to crawl a given repository's
-dependency graph, given by the string `ownerRepo` of the form `"owner/repo"`.
+dependency graph.
+
+To simply get the dependency graph of a repo, `opts` can be a string of the form
+`"owner/repo"`.
 
 `cb` is of the form `function (err, graph)`. `graph` contains an object of the
 form
@@ -60,6 +63,25 @@ where `issueName` is of the form `owner/repo/issue-num` (e.g.
 
 Keys are entries in the dependency graph, and the issues it maps to are its
 dependencies.
+
+For more flexible use, `opts` can be an object of the form
+
+```js
+{
+  repo: 'owner/repo',
+  repoToGitHubIssues: function (repoName, cb) { ... },
+  issueToGitHubIssues: function (issueName, cb) { ... },
+}
+```
+
+`repoName` will be of the form `owner/repo` and `issueName` of the form
+`owner/repo/issue-num`.
+
+If not supplied, `repoToGitHubIssues` and `issueToGitHubIssues` will default to
+the built-in functionality of querying the GitHub API. These functions are
+overwritable here so that the module can a) be easily unit tested, and b) you
+can crawl your own offline datasets by e.g. substituting github api requests for
+local filesystem reads.
 
 
 ## Install
