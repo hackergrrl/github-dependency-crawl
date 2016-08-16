@@ -16,11 +16,41 @@ module.exports = function (opts, cb) {
     throw new Error('missing first param "repo"')
   }
 
+  opts.orgToRepos = opts.orgToRepos || orgToRepos
   opts.repoToGitHubIssues = opts.repoToGitHubIssues || ownerRepoToGitHubIssues
   opts.issueToGitHubIssue = opts.issueToGitHubIssue || issueToGitHubIssue
 
-  recursiveRepoNameToDependencyGraph(opts.repo, {}, cb)
+  // Recurse on org or repo
+  var numComponents = opts.repo.split('/').length
+  if (numComponents === 1) {
+    recursiveOrgNameToDependencyGraph(opts.repo, cb)
+  } else if (numComponents === 2) {
+    recursiveRepoNameToDependencyGraph(opts.repo, {}, cb)
+  } else {
+    throw new Error('repo must be "owner" or "owner/repo"')
+  }
 
+  function recursiveOrgNameToDependencyGraph (org, cb) {
+    "Asynchronously gets all issues from all GitHub repos of a GitHub organization and follows all out-of-repo links recursively, returning a full dependency graph for that organization."
+
+    // Get all repos in the org
+    orgToRepos(org, function (err, repos) {
+      // console.log('got all repos', repos.length)
+
+      asyncReduce(repos, {},
+        function reduce (graph, repo, callback) {
+          recursiveRepoNameToDependencyGraph(repo, {}, function (err, graph2) {
+            if (err) return callback(err)
+            // console.log('  got repo', repo)
+            callback(null, flatMerge(graph, graph2))
+          })
+        },
+        function done (err, res) {
+          if (err) return cb(err)
+          cb(null, res)
+        })
+    })
+  }
 
   function recursiveRepoNameToDependencyGraph (repo, graph, cb) {
     "Asynchronously gets all issues from a GitHub repo and follows all out-of-repo links recursively, returning a full dependency graph for that repo."
@@ -139,6 +169,8 @@ module.exports = function (opts, cb) {
           return cb(err)
         }
 
+        // console.log('    got issues', body.length)
+
         issuesAccum = issuesAccum.concat(body)
 
         // Recursive pagination, or terminate
@@ -155,11 +187,71 @@ module.exports = function (opts, cb) {
       })
     }
   }
+
+  function orgToRepos (org, cb) {
+    "Given a string of the form :owner, retrieve a list of GitHub repo names."
+
+    var url = 'https://api.github.com/orgs/' + org + '/repos'
+
+    // Only grab repos the org actually 'owns'.
+    url += '?type=source'
+
+    fetchReposPage(url, [], cb)
+
+
+    function fetchReposPage (url, reposAccum, cb) {
+      "Recursively fetches subsequent pages of GitHub repos via the GitHub API."
+
+      var ropts = {
+        url: url,
+        headers: {
+          'User-Agent': userAgent()
+        }
+      }
+      if (opts.auth && opts.auth.client_id && opts.auth.client_secret) {
+        ropts.url += '&client_id=' + opts.auth.client_id
+        ropts.url += '&client_secret=' + opts.auth.client_secret
+      }
+      // console.error('request:', ropts.url)
+      request(ropts, function (err, res, body) {
+        // Bogus response
+        if (err || res.statusCode !== 200) {
+          // console.log(res)
+          return cb(err || new Error('status code ' + res.statusCode))
+        }
+
+        // Parse JSON response
+        try {
+          body = JSON.parse(body)
+        } catch (err) {
+          return cb(err)
+        }
+
+        // Map results to canonical :owner/:repo names
+        body = body.map(function (repo) {
+          return repo.full_name
+        })
+
+        reposAccum = reposAccum.concat(body)
+
+        // Recursive pagination, or terminate
+        if (res.headers['link']) {
+          var links = parseLinkHeader(res.headers['link'])
+          if (links['next']) {
+            return fetchReposPage(links['next'], reposAccum, cb)
+          }
+        }
+
+        // Fall-through base case: no more pages
+        // console.log('accum', reposAccum)
+        cb(null, reposAccum)
+      })
+    }
+  }
 }
 
-// TODO: let api users plug+play this function
 function issueToGitHubIssue (issue, cb) {
-  "Given a string of the form :owner/:repo/:issue, asynchronously retrives the corresponding GitHub API issue."
+  "Given a string of the form :owner/:repo/:issue, asynchronously retrieves the corresponding GitHub API issue."
 
   // Validate the input
   var components = issue.split('/')
