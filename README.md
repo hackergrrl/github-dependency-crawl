@@ -77,6 +77,8 @@ For more flexible use, `opts` can be an object of the form
 `repoName` will be of the form `owner/repo` and `issueName` of the form
 `owner/repo/issue-num`.
 
+By default, the crawler will visit all pages of issues per-repo.
+
 If not supplied, `repoToGitHubIssues` and `issueToGitHubIssues` will default to
 the built-in functionality of querying the GitHub API. These functions are
 overwritable here so that the module can a) be easily unit tested, and b) you
