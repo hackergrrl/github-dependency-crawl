@@ -95,7 +95,7 @@ module.exports = function (opts, cb) {
 }
 
 function ownerRepoToGitHubIssues (ownerRepo, cb) {
-  "Given a string of the form :owner/:repo, asynchronously retrives a list of GitHub API issues."
+  "Given a string of the form :owner/:repo, asynchronously retrives a list of GitHub API issues. Recursively steps through all pages of issues."
 
   var url = 'https://api.github.com/repos/'
 
@@ -106,29 +106,50 @@ function ownerRepoToGitHubIssues (ownerRepo, cb) {
     throw new Error('unrecognized repo format. expected: owner/repo')
   }
 
-  var opts = {
-    url: url,
-    headers: {
-      'User-Agent': userAgent()
+  // Get all issues (not just open ones).
+  url += "?state=all"
+
+  fetchIssuesPage(url, [], cb)
+
+
+  function fetchIssuesPage (url, issuesAccum, cb) {
+    "Recursively fetches subsequent pages of GitHub issues via the GitHub API."
+
+    var opts = {
+      url: url,
+      headers: {
+        'User-Agent': userAgent()
+      }
     }
+    // console.error('request:', opts.url)
+    request(opts, function (err, res, body) {
+      // Bogus response
+      if (err || res.statusCode !== 200) {
+        // console.log(res)
+        return cb(err || new Error('status code ' + res.statusCode))
+      }
+
+      // Parse JSON response
+      try {
+        body = JSON.parse(body)
+      } catch (err) {
+        return cb(err)
+      }
+
+      issuesAccum = issuesAccum.concat(body)
+
+      // Recursive pagination, or terminate
+      if (res.headers['link']) {
+        var links = parseLinkHeader(res.headers['link'])
+        if (links['next']) {
+          return fetchIssuesPage(links['next'], issuesAccum, cb)
+        }
+      }
+
+      // Fall-through base case: no more pages
+      cb(null, issuesAccum)
+    })
   }
-  // console.error('request:', opts.url)
-  request(opts, function (err, res, body) {
-    // Bogus response
-    if (err || res.statusCode !== 200) {
-      // console.log(res)
-      return cb(err || new Error('status code ' + res.statusCode))
-    }
-
-    // Parse JSON response
-    try {
-      body = JSON.parse(body)
-    } catch (err) {
-      return cb(err)
-    }
-
-    cb(null, body)
-  })
 }
 
 // TODO: let api users plug+play this function
@@ -216,6 +237,10 @@ function getUnresolvedDependencies (graph) {
 function extractDependencyUrls (string, ownerRepo) {
   "Given a freeform multi-line string, extract all dependencies as URLs. If an optional 'ownerRepo' string is given (e.g. noffle/latest-tweets), dependency strings of the form 'Depends on #24' can be resolved to the current repo."
 
+  if (!string) {
+    return []
+  }
+
   // TODO: assumes \r\n newlines, which is correct *today*, but in THE FUTURE?
   // iterate over lines in the body
   return filterMap(string.split('\r\n'), function (line) {
@@ -280,6 +305,34 @@ function replaceInGraph (graph, from, to) {
         return (dep === from) ? to : dep
       })
     })
+}
+
+function parseLinkHeader (header) {
+  `Given a GitHub 'Link' header string, parses it and returns an object mapping
+  'rel' names to URLs.
+
+  '<https://api.github.com/repositories/20312497/issues?page=2>; rel="next", <https://api.github.com/repositories/20312497/issues?page=10>; rel="last"'
+
+  would map to
+
+  {
+    "next": "https://api.github.com/repositories/20312497/issues?page=2"
+    "last": "https://api.github.com/repositories/20312497/issues?page=10"
+  }
+  `
+
+  var res = {}
+
+  var regex = /<(.*?)>; rel="(\w+)"/
+  var match
+  while (match = header.match(regex)) {
+    var url = match[1]
+    var name = match[2]
+    res[name] = url
+    header = header.substring(match[0].length)
+  }
+
+  return res
 }
 
 function filterMap (list, func) {
