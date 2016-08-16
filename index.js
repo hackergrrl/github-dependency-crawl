@@ -77,10 +77,6 @@ module.exports = function (opts, cb) {
   function issueToDependencyGraph (issue, cb) {
     "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
 
-    if (!issue) {
-      return cb(null, {})
-    }
-
     opts.issueToGitHubIssue(issue, function (err, res) {
       if (err) return cb(err)
 
@@ -96,63 +92,68 @@ module.exports = function (opts, cb) {
       cb(null, graph)
     })
   }
-}
 
-function ownerRepoToGitHubIssues (ownerRepo, cb) {
-  "Given a string of the form :owner/:repo, asynchronously retrives a list of GitHub API issues. Recursively steps through all pages of issues."
+  function ownerRepoToGitHubIssues (ownerRepo, cb) {
+    "Given a string of the form :owner/:repo, asynchronously retrives a list of GitHub API issues. Recursively steps through all pages of issues."
 
-  var url = 'https://api.github.com/repos/'
+    var url = 'https://api.github.com/repos/'
 
-  // Match freeform repo string to a GH url
-  if (ownerRepo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
-    url += ownerRepo + '/issues'
-  } else {
-    throw new Error('unrecognized repo format. expected: owner/repo')
-  }
-
-  // Get all issues (not just open ones).
-  url += "?state=all"
-
-  fetchIssuesPage(url, [], cb)
-
-
-  function fetchIssuesPage (url, issuesAccum, cb) {
-    "Recursively fetches subsequent pages of GitHub issues via the GitHub API."
-
-    var opts = {
-      url: url,
-      headers: {
-        'User-Agent': userAgent()
-      }
+    // Match freeform repo string to a GH url
+    if (ownerRepo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
+      url += ownerRepo + '/issues'
+    } else {
+      throw new Error('unrecognized repo format. expected: owner/repo')
     }
-    // console.error('request:', opts.url)
-    request(opts, function (err, res, body) {
-      // Bogus response
-      if (err || res.statusCode !== 200) {
-        // console.log(res)
-        return cb(err || new Error('status code ' + res.statusCode))
-      }
 
-      // Parse JSON response
-      try {
-        body = JSON.parse(body)
-      } catch (err) {
-        return cb(err)
-      }
+    // Get all issues (not just open ones).
+    url += "?state=all"
 
-      issuesAccum = issuesAccum.concat(body)
+    fetchIssuesPage(url, [], cb)
 
-      // Recursive pagination, or terminate
-      if (res.headers['link']) {
-        var links = parseLinkHeader(res.headers['link'])
-        if (links['next']) {
-          return fetchIssuesPage(links['next'], issuesAccum, cb)
+
+    function fetchIssuesPage (url, issuesAccum, cb) {
+      "Recursively fetches subsequent pages of GitHub issues via the GitHub API."
+
+      var ropts = {
+        url: url,
+        headers: {
+          'User-Agent': userAgent()
         }
       }
+      if (opts.auth && opts.auth.client_id && opts.auth.client_secret) {
+        ropts.url += '&client_id=' + opts.auth.client_id
+        ropts.url += '&client_secret=' + opts.auth.client_secret
+      }
+      // console.error('request:', ropts.url)
+      request(ropts, function (err, res, body) {
+        // Bogus response
+        if (err || res.statusCode !== 200) {
+          // console.log(res)
+          return cb(err || new Error('status code ' + res.statusCode))
+        }
 
-      // Fall-through base case: no more pages
-      cb(null, issuesAccum)
-    })
+        // Parse JSON response
+        try {
+          body = JSON.parse(body)
+        } catch (err) {
+          return cb(err)
+        }
+
+        issuesAccum = issuesAccum.concat(body)
+
+        // Recursive pagination, or terminate
+        if (res.headers['link']) {
+          var links = parseLinkHeader(res.headers['link'])
+          if (links['next']) {
+            return fetchIssuesPage(links['next'], issuesAccum, cb)
+          }
+        }
+
+        // Fall-through base case: no more pages
+        // console.log('accum', issuesAccum)
+        cb(null, issuesAccum)
+      })
+    }
   }
 }
 
@@ -171,14 +172,18 @@ function issueToGitHubIssue (issue, cb) {
   var issueNum = components[2]
 
   // Retrieve the issue
-  var opts = {
+  var ropts = {
     url: 'https://api.github.com/repos/' + owner + '/' + repo + '/issues/' + issueNum,
     headers: {
       'User-Agent': userAgent()
     }
   }
+  if (opts.auth && opts.auth.client_id && opts.auth.client_secret) {
+    ropts.url += '&client_id=' + opts.auth.client_id
+    ropts.url += '&client_secret=' + opts.auth.client_secret
+  }
   // console.error('request:', opts.url)
-  request(opts, function (err, res, body) {
+  request(ropts, function (err, res, body) {
     // Bogus response
     if (err || res.statusCode !== 200) {
       // console.log(res)

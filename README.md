@@ -71,11 +71,18 @@ For more flexible use, `opts` can be an object of the form
   repo: 'owner/repo',
   repoToGitHubIssues: function (repoName, cb) { ... },
   issueToGitHubIssues: function (issueName, cb) { ... },
+  auth: {
+    client_id: '...',
+    client_secret: '...'
+  }
 }
 ```
 
 `repoName` will be of the form `owner/repo` and `issueName` of the form
 `owner/repo/issue-num`.
+
+`auth` provides the option to include GitHub API credentials, to be able to make
+a higher # requests / hour.
 
 By default, the crawler will visit all pages of issues per-repo.
 
