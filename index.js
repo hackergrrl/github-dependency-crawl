@@ -3,7 +3,7 @@ var urlMatch = require('url-regexp').match
 var urlParse = require('url').parse
 var asyncReduce = require('async').reduce
 
-// TODO: use a github api module instead of http api directly
+// TODO: consider using a github api module instead of http api directly
 
 
 module.exports = function (opts, cb) {
@@ -76,6 +76,10 @@ module.exports = function (opts, cb) {
 
   function issueToDependencyGraph (issue, cb) {
     "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
+
+    if (!issue) {
+      return cb(null, {})
+    }
 
     opts.issueToGitHubIssue(issue, function (err, res) {
       if (err) return cb(err)
@@ -204,8 +208,10 @@ function githubIssuesToDependencyGraph (issues) {
   issues = filterMap(issues, function (issue) {
     var name = dependencyUrlToCanonicalName(issue.url)
     var ownerRepo = name.split('/').slice(0, 2).join('/')
-    var deps = extractDependencyUrls(issue.body, ownerRepo)
-      .map(dependencyUrlToCanonicalName)
+    var deps = filterMap(
+      extractDependencyUrls(issue.body, ownerRepo),
+      dependencyUrlToCanonicalName)
+
     var res = {}
     res[name] = deps
     return res
