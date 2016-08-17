@@ -45,7 +45,8 @@ Asynchronously makes many GitHub API requests to crawl a given repository's
 dependency graph.
 
 To simply get the dependency graph of a repo, `opts` can be a string of the form
-`"owner/repo"`.
+`"org/repo"` for a single repo, or `"org"` to crawl all issues of all
+repositories in an organization.
 
 `cb` is of the form `function (err, graph)`. `graph` contains an object of the
 form
@@ -58,7 +59,7 @@ form
 }
 ```
 
-where `issueName` is of the form `owner/repo/issue-num` (e.g.
+where `issueName` is of the form `org/repo/issue-num` (e.g.
 `noffle/latest-tweets/1`).
 
 Keys are entries in the dependency graph, and the issues it maps to are its
@@ -68,7 +69,7 @@ For more flexible use, `opts` can be an object of the form
 
 ```js
 {
-  repo: 'owner/repo',
+  repo: 'org/repo' || 'org',
   orgToRepos: function (orgName, cb) { ... },
   repoToGitHubIssues: function (repoName, cb) { ... },
   issueToGitHubIssues: function (issueName, cb) { ... },
@@ -79,8 +80,8 @@ For more flexible use, `opts` can be an object of the form
 }
 ```
 
-`repoName` will be of the form `owner/repo` and `issueName` of the form
-`owner/repo/issue-num`.
+`repoName` will be of the form `org/repo` and `issueName` of the form
+`org/repo/issue-num`.
 
 `auth` provides the option to include GitHub API credentials, to be able to make
 a higher # requests / hour.
