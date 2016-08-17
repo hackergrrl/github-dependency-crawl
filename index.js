@@ -19,11 +19,11 @@ module.exports = function (opts, cb) {
   // Validate the repo
   var components = opts.repo.split('/')
   if (components.length !== 2 && components.length !== 1) {
-    throw new Error('malformed input; expected :owner/:repo or :owner')
+    throw new Error('malformed input; expected :org/:repo or :org')
   }
 
   opts.orgToRepos = opts.orgToRepos || orgToRepos
-  opts.repoToGitHubIssues = opts.repoToGitHubIssues || ownerRepoToGitHubIssues
+  opts.repoToGitHubIssues = opts.repoToGitHubIssues || orgRepoToGitHubIssues
   opts.issueToGitHubIssue = opts.issueToGitHubIssue || issueToGitHubIssue
 
   // Recurse on org or repo
@@ -33,7 +33,7 @@ module.exports = function (opts, cb) {
   } else if (numComponents === 2) {
     recursiveRepoNameToDependencyGraph(opts.repo, {}, cb)
   } else {
-    throw new Error('repo must be "owner" or "owner/repo"')
+    throw new Error('repo must be "org" or "org/repo"')
   }
 
   function recursiveOrgNameToDependencyGraph (org, cb) {
@@ -61,7 +61,7 @@ module.exports = function (opts, cb) {
   function recursiveRepoNameToDependencyGraph (repo, graph, cb) {
     "Asynchronously gets all issues from a GitHub repo and follows all out-of-repo links recursively, returning a full dependency graph for that repo."
 
-    ownerRepoToDependencyGraph(repo, function (err, graph2) {
+    orgRepoToDependencyGraph(repo, function (err, graph2) {
       if (err) return cb(err)
 
       // console.log('repo ->', graph2)
@@ -84,7 +84,7 @@ module.exports = function (opts, cb) {
     }
 
     // TODO: a possible optimization might be to check if there are e.g. > N
-    // unresolved dependencies for a single :owner/:repo tuple, and just do a
+    // unresolved dependencies for a single :org/:repo tuple, and just do a
     // fetch of that repo's full issue set, filtering out what's not needed.
     asyncReduce(unresolved, graph,
       function reduce (graph, issue, callback) {
@@ -100,10 +100,10 @@ module.exports = function (opts, cb) {
       })
   }
 
-  function ownerRepoToDependencyGraph (ownerRepo, cb) {
-    "Given a GitHub repo of the form ':owner/:repo', returns a dependency graph."
+  function orgRepoToDependencyGraph (orgRepo, cb) {
+    "Given a GitHub repo of the form ':org/:repo', returns a dependency graph."
 
-    opts.repoToGitHubIssues(ownerRepo, function (err, issues) {
+    opts.repoToGitHubIssues(orgRepo, function (err, issues) {
       if (err) return cb(err)
       cb(null, githubIssuesToDependencyGraph(issues))
     })
@@ -111,7 +111,7 @@ module.exports = function (opts, cb) {
 
 
   function issueToDependencyGraph (issue, cb) {
-    "Given an issue of the form ':owner/:repo/:issue-num', returns a list of issues and their declared dependencies."
+    "Given an issue of the form ':org/:repo/:issue-num', returns a list of issues and their declared dependencies."
 
     opts.issueToGitHubIssue(issue, function (err, res) {
       if (err) return cb(err)
@@ -129,16 +129,16 @@ module.exports = function (opts, cb) {
     })
   }
 
-  function ownerRepoToGitHubIssues (ownerRepo, cb) {
-    "Given a string of the form :owner/:repo, asynchronously retrives a list of GitHub API issues. Recursively steps through all pages of issues."
+  function orgRepoToGitHubIssues (orgRepo, cb) {
+    "Given a string of the form :org/:repo, asynchronously retrives a list of GitHub API issues. Recursively steps through all pages of issues."
 
     var url = 'https://api.github.com/repos/'
 
     // Match freeform repo string to a GH url
-    if (ownerRepo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
-      url += ownerRepo + '/issues'
+    if (orgRepo.match(/[A-Za-z0-9-]+\/[A-Za-z0-9-]+/)) {
+      url += orgRepo + '/issues'
     } else {
-      throw new Error('unrecognized repo format. expected: owner/repo')
+      throw new Error('unrecognized repo format. expected: org/repo')
     }
 
     // Get all issues (not just open ones).
@@ -195,7 +195,7 @@ module.exports = function (opts, cb) {
   }
 
   function orgToRepos (org, cb) {
-    "Given a string of the form :owner, retrieve a list of GitHub repo names."
+    "Given a string of the form :org, retrieve a list of GitHub repo names."
 
     var url = 'https://api.github.com/orgs/' + org + '/repos'
 
@@ -231,7 +231,7 @@ module.exports = function (opts, cb) {
           return cb(err)
         }
 
-        // Map results to canonical :owner/:repo names
+        // Map results to canonical :org/:repo names
         body = body.map(function (repo) {
           return repo.full_name
         })
@@ -254,21 +254,21 @@ module.exports = function (opts, cb) {
   }
 
   function issueToGitHubIssue (issue, cb) {
-    "Given a string of the form :owner/:repo/:issue, asynchronously retrieves the corresponding GitHub API issue."
+    "Given a string of the form :org/:repo/:issue, asynchronously retrieves the corresponding GitHub API issue."
 
     // Validate the input
     var components = issue.split('/')
     if (components.length !== 3) {
-      throw new Error('malformed input; expected :owner/:repo/:issue-num')
+      throw new Error('malformed input; expected :org/:repo/:issue-num')
     }
 
-    var owner = components[0]
+    var org = components[0]
     var repo = components[1]
     var issueNum = components[2]
 
     // Retrieve the issue
     var ropts = {
-      url: 'https://api.github.com/repos/' + owner + '/' + repo + '/issues/' + issueNum,
+      url: 'https://api.github.com/repos/' + org + '/' + repo + '/issues/' + issueNum,
       headers: {
         'User-Agent': userAgent()
       }
@@ -308,9 +308,9 @@ function githubIssuesToDependencyGraph (issues) {
   // }
   issues = filterMap(issues, function (issue) {
     var name = dependencyUrlToCanonicalName(issue.url)
-    var ownerRepo = name.split('/').slice(0, 2).join('/')
+    var orgRepo = name.split('/').slice(0, 2).join('/')
     var deps = filterMap(
-      extractDependencyUrls(issue.body, ownerRepo),
+      extractDependencyUrls(issue.body, orgRepo),
       dependencyUrlToCanonicalName)
 
     var res = {}
@@ -341,8 +341,8 @@ function getUnresolvedDependencies (graph) {
     }, [])
 }
 
-function extractDependencyUrls (string, ownerRepo) {
-  "Given a freeform multi-line string, extract all dependencies as URLs. If an optional 'ownerRepo' string is given (e.g. noffle/latest-tweets), dependency strings of the form 'Depends on #24' can be resolved to the current repo."
+function extractDependencyUrls (string, orgRepo) {
+  "Given a freeform multi-line string, extract all dependencies as URLs. If an optional 'orgRepo' string is given (e.g. noffle/latest-tweets), dependency strings of the form 'Depends on #24' can be resolved to the current repo."
 
   if (!string) {
     return []
@@ -358,17 +358,17 @@ function extractDependencyUrls (string, ownerRepo) {
       if (urls.length === 1) {
         return urls[0]
       }
-    } else if (ownerRepo && line.match(/^Depends on #(\d+)/)) {
+    } else if (orgRepo && line.match(/^Depends on #(\d+)/)) {
       // extract issue-num
       var issueNum = line.match(/^Depends on #(\d+)/)[1]
-      return 'https://github.com/' + ownerRepo + '/issues/' + issueNum
+      return 'https://github.com/' + orgRepo + '/issues/' + issueNum
     }
     return false
   })
 }
 
 function dependencyUrlToCanonicalName (url) {
-  "Converts a GitHub URL to canonical :owner/:repo/:issue-num form, or null if no such form could be extracted."
+  "Converts a GitHub URL to canonical :org/:repo/:issue-num form, or null if no such form could be extracted."
 
   // "url": "https://api.github.com/repos/jbenet/random-ideas/issues/37",
 
