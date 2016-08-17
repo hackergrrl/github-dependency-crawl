@@ -5,28 +5,32 @@ var asyncReduce = require('async').reduce
 
 // TODO: consider using a github api module instead of http api directly
 
-
 module.exports = function (opts, cb) {
-
   if (typeof opts === 'string') {
     opts = { repo: opts }
+  }
+
+  if (!cb || typeof cb !== 'function') {
+    throw new Error('no callback given')
   }
 
   if (!opts.repo) {
     throw new Error('missing first param "repo"')
   }
 
-  // Validate the repo
-  var components = opts.repo.split('/')
-  if (components.length !== 2 && components.length !== 1) {
+  // Parse the org/repo input
+  var orgRepo = parseOrgRepoInput(opts.repo)
+  if (!orgRepo) {
     throw new Error('malformed input; expected :org/:repo or :org')
   }
+  opts.repo = orgRepo
 
+  // Plug-and-play transform functions
   opts.orgToRepos = opts.orgToRepos || orgToRepos
   opts.repoToGitHubIssues = opts.repoToGitHubIssues || orgRepoToGitHubIssues
   opts.issueToGitHubIssue = opts.issueToGitHubIssue || issueToGitHubIssue
 
-  // Recurse on org or repo
+  // Aaand action! Recurse on the org or repo
   var numComponents = opts.repo.split('/').length
   if (numComponents === 1) {
     recursiveOrgNameToDependencyGraph(opts.repo, cb)
@@ -35,6 +39,11 @@ module.exports = function (opts, cb) {
   } else {
     throw new Error('repo must be "org" or "org/repo"')
   }
+
+
+  // ---------------------------------------------------------------------------------------
+  // Various helper functions, included in the same closure to retain the binding to 'opts'.
+  // ---------------------------------------------------------------------------------------
 
   function recursiveOrgNameToDependencyGraph (org, cb) {
     "Asynchronously gets all issues from all GitHub repos of a GitHub organization and follows all out-of-repo links recursively, returning a full dependency graph for that organization."
@@ -412,6 +421,43 @@ function replaceInGraph (graph, from, to) {
         return (dep === from) ? to : dep
       })
     })
+}
+
+function parseOrgRepoInput (input) {
+  "Takes a string and produces a string of the form :org/:repo or :org. If the\
+  string is an HTTP(S) GitHub URL, it will be parsed and reduced the\
+  aforementioned form. Returns null if parsing is not successful."
+
+  var res = null
+
+  // Parse repo as url, if it is a url
+  var parsed = urlParse(input)
+  if (parsed && parsed.protocol && parsed.path) {
+    // Only support github.com (for now)
+    if (parsed.host !== 'github.com') {
+      return null
+    }
+
+    var components = parsed.path.split('/')
+    // https://www.github.com/OWNER/REPO
+    if (components.length === 3) {
+      res = components[1] + '/' + components[2]
+    }
+    // or https://www.github.com/OWNER
+    else if (components.length === 2) {
+      res = components[1] + '/' + components[2]
+    }
+  } else {
+    res = input
+  }
+
+  // Validate the resultant repo structure
+  var components = res.split('/')
+  if (components.length === 2 || components.length === 1) {
+    return res
+  }
+
+  return null
 }
 
 function parseLinkHeader (header) {

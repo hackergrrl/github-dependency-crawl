@@ -44,3 +44,56 @@ test('basic', function (t) {
   })
 })
 
+test('url inputs', function (t) {
+  t.plan(4)
+
+  // no-op transforms
+  var opts = {
+    orgToRepos: function (org, cb) {
+      process.nextTick(function () {
+        cb(null, [])
+      })
+    },
+    repoToGitHubIssues: function (ownerRepo, cb) {
+      process.nextTick(function () {
+        cb(null, [])
+      })
+    },
+    issueToGitHubIssue: function (issue, cb) {
+      process.nextTick(function () {
+        cb(null, [])
+      })
+    }
+  }
+
+  function fail () { t.fail("shouldn't hit callback") }
+
+  // org + repo
+  opts.repo = 'https://github.com/noffle/github-dependency-crawl'
+  crawl(opts, function (err, res) {
+    t.equal(err, null)
+  })
+
+  // just an org
+  opts.repo = 'https://github.com/noffle'
+  crawl(opts, function (err, res) {
+    t.equal(err, null)
+  })
+
+  // not github.com
+  opts.repo = 'http://github.org/noffle'
+  try {
+    crawl(opts, fail)
+  } catch (e) {
+    t.pass()
+  }
+
+  // no issue support yet
+  opts.repo = 'http://github.com/noffle/bananas/issues/9'
+  try {
+    crawl(opts, fail)
+  } catch (e) {
+    t.pass()
+  }
+})
+
