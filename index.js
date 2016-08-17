@@ -155,50 +155,50 @@ module.exports = function (opts, cb) {
       })
     }
   }
-}
 
-// TODO: let api users plug+play this function
-function issueToGitHubIssue (issue, cb) {
-  "Given a string of the form :owner/:repo/:issue, asynchronously retrives the corresponding GitHub API issue."
+  // TODO: let api users plug+play this function
+  function issueToGitHubIssue (issue, cb) {
+    "Given a string of the form :owner/:repo/:issue, asynchronously retrives the corresponding GitHub API issue."
 
-  // Validate the input
-  var components = issue.split('/')
-  if (components.length !== 3) {
-    throw new Error('malformed input; expected :owner/:repo/:issue-num')
-  }
-
-  var owner = components[0]
-  var repo = components[1]
-  var issueNum = components[2]
-
-  // Retrieve the issue
-  var ropts = {
-    url: 'https://api.github.com/repos/' + owner + '/' + repo + '/issues/' + issueNum,
-    headers: {
-      'User-Agent': userAgent()
-    }
-  }
-  if (opts.auth && opts.auth.client_id && opts.auth.client_secret) {
-    ropts.url += '&client_id=' + opts.auth.client_id
-    ropts.url += '&client_secret=' + opts.auth.client_secret
-  }
-  // console.error('request:', opts.url)
-  request(ropts, function (err, res, body) {
-    // Bogus response
-    if (err || res.statusCode !== 200) {
-      // console.log(res)
-      return cb(err || new Error('status code ' + res.statusCode))
+    // Validate the input
+    var components = issue.split('/')
+    if (components.length !== 3) {
+      throw new Error('malformed input; expected :owner/:repo/:issue-num')
     }
 
-    // Parse JSON response
-    try {
-      body = JSON.parse(body)
-    } catch (err) {
-      return cb(err)
-    }
+    var owner = components[0]
+    var repo = components[1]
+    var issueNum = components[2]
 
-    cb(null, body)
-  })
+    // Retrieve the issue
+    var ropts = {
+      url: 'https://api.github.com/repos/' + owner + '/' + repo + '/issues/' + issueNum,
+      headers: {
+        'User-Agent': userAgent()
+      }
+    }
+    if (opts.auth && opts.auth.client_id && opts.auth.client_secret) {
+      ropts.url += '&client_id=' + opts.auth.client_id
+      ropts.url += '&client_secret=' + opts.auth.client_secret
+    }
+    // console.error('request:', opts.url)
+    request(ropts, function (err, res, body) {
+      // Bogus response
+      if (err || res.statusCode !== 200) {
+        // console.log(res)
+        return cb(err || new Error('status code ' + res.statusCode))
+      }
+
+      // Parse JSON response
+      try {
+        body = JSON.parse(body)
+      } catch (err) {
+        return cb(err)
+      }
+
+      cb(null, body)
+    })
+  }
 }
 
 function githubIssuesToDependencyGraph (issues) {
