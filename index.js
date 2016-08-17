@@ -16,6 +16,12 @@ module.exports = function (opts, cb) {
     throw new Error('missing first param "repo"')
   }
 
+  // Validate the repo
+  var components = opts.repo.split('/')
+  if (components.length !== 2 && components.length !== 1) {
+    throw new Error('malformed input; expected :owner/:repo or :owner')
+  }
+
   opts.orgToRepos = opts.orgToRepos || orgToRepos
   opts.repoToGitHubIssues = opts.repoToGitHubIssues || ownerRepoToGitHubIssues
   opts.issueToGitHubIssue = opts.issueToGitHubIssue || issueToGitHubIssue
@@ -215,7 +221,7 @@ module.exports = function (opts, cb) {
       request(ropts, function (err, res, body) {
         // Bogus response
         if (err || res.statusCode !== 200) {
-          // console.log(res) return cb(err || new Error('status code ' + res.statusCode))
+          return cb(err || new Error('status code ' + res.statusCode))
         }
 
         // Parse JSON response
