@@ -46,8 +46,7 @@ dependency graph.
 
 To simply get the dependency graph of a repo, `opts` can be a string of the form
 `"org/repo"` for a single repo, or `"org"` to crawl all issues of all
-repositories in an organization. The input may also be a GitHub URL, such as
-`"https://github.com/noffle/talks"`.
+repositories in an organization.
 
 `cb` is of the form `function (err, graph)`. `graph` contains an object of the
 form

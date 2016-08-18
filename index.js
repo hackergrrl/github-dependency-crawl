@@ -428,33 +428,10 @@ function parseOrgRepoInput (input) {
   string is an HTTP(S) GitHub URL, it will be parsed and reduced the\
   aforementioned form. Returns null if parsing is not successful."
 
-  var res = null
-
-  // Parse repo as url, if it is a url
-  var parsed = urlParse(input)
-  if (parsed && parsed.protocol && parsed.path) {
-    // Only support github.com (for now)
-    if (parsed.host !== 'github.com') {
-      return null
-    }
-
-    var components = parsed.path.split('/')
-    // https://www.github.com/OWNER/REPO
-    if (components.length === 3) {
-      res = components[1] + '/' + components[2]
-    }
-    // or https://www.github.com/OWNER
-    else if (components.length === 2) {
-      res = components[1] + '/' + components[2]
-    }
-  } else {
-    res = input
-  }
-
   // Validate the resultant repo structure
-  var components = res.split('/')
+  var components = input.split('/')
   if (components.length === 2 || components.length === 1) {
-    return res
+    return input
   }
 
   return null
